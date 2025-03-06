@@ -2,53 +2,51 @@ import numpy as np
 from PIL import Image
 import tensorflow as tf
 from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware  # Import CORSMiddleware
-import shutil
-import os
+from fastapi.middleware.cors import CORSMiddleware
+import gc
 
 app = FastAPI()
 
-# CORS configuration to allow requests from all sources
+# Enable CORS for frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Load Alzheimer's model
-alzheimers_model = tf.keras.models.load_model("alzheimers_model.h5")
+# Label mappings for Alzheimer's classification
+alzheimers_labels = ["Mild Demented", "Moderate Demented", "Non Demented", "Very Mild Demented"]
 
 # Define preprocessing function
-def preprocess_alzheimers_image(image_path):
+def preprocess_alzheimers_image(image):
     """ Preprocess image for Alzheimer's model using MobileNetV2 preprocessing. """
-    img = Image.open(image_path).resize((224, 224))  # Fixed to (224, 224)
+    img = Image.open(image).convert("RGB").resize((224, 224))  # Convert to RGB and resize
     img_array = np.asarray(img)
     img_array = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)  # MobileNetV2 preprocessing
     img_array = np.expand_dims(img_array, axis=0)  # Expand dimensions
     return img_array
 
-# Define label mappings
-alzheimers_labels = ["Mild Demented", "Moderate Demented", "Non Demented", "Very Mild Demented"]
-
 # Prediction function
-def predict_alzheimers(image_path):
-    img_array = preprocess_alzheimers_image(image_path)
-    predictions = alzheimers_model.predict(img_array)
+def predict_alzheimers(image):
+    """ Load model dynamically, predict, then unload to save memory. """
+    model = tf.keras.models.load_model("alzheimers_model.h5")  # Load model on demand
+    img_array = preprocess_alzheimers_image(image)
+    predictions = model.predict(img_array)
+    
     predicted_class = alzheimers_labels[np.argmax(predictions[0])]
     confidence = np.max(predictions[0]) * 100
+
+    del model  # Delete model from memory
+    gc.collect()  # Free up memory
+
     return predicted_class, confidence
 
 # FastAPI Endpoint
 @app.post("/predict_alzheimers/")
 async def predict_alzheimers_endpoint(file: UploadFile = File(...)):
-    file_path = f"temp_{file.filename}"
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    prediction, confidence = predict_alzheimers(file_path)
-    os.remove(file_path)  # Cleanup
-
+    """ Endpoint to receive an image, process it, and return the prediction. """
+    prediction, confidence = predict_alzheimers(file.file)
     return {"diagnosis": prediction, "confidence": f"{confidence:.2f}%"}
 
