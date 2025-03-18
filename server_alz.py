@@ -48,3 +48,7 @@ def predict_alzheimers(image):
 async def predict_alzheimers_endpoint(file: UploadFile = File(...)):
     prediction, confidence = predict_alzheimers(file.file)
     return {"diagnosis": prediction, "confidence": f"{confidence:.2f}%"}
+    
+@app.get("/")
+def health_check():
+    return {"status": "OK"}
